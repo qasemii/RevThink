@@ -10,6 +10,7 @@ import logging
 from collections import defaultdict
 import re
 import sys
+import os
 
 from huggingface_hub import login
 
