@@ -444,13 +444,13 @@ class CoTMCQEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate language models on MCQ benchmarks with CoT reasoning")
-    parser.add_argument("--model", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct",
+    parser.add_argument("--model", type=str, default="meta-llama/Llama-3.2-1B-Instruct",
                        help="HuggingFace model name") # model
     parser.add_argument("--dataset", type=str, default="tau/commonsense_qa",
                        help="Dataset name (tau/commonsense_qa, ai2_arc, hellaswag)") # dataset
     parser.add_argument("--split", type=str, default="validation",
                        help="Dataset split to evaluate on") # split
-    parser.add_argument("--max_samples", type=int, default=100,
+    parser.add_argument("--max_samples", type=int, default=None,
                        help="Maximum number of samples to evaluate") # max number of samples
     parser.add_argument("--use_cot", action="store_true", default=True,
                        help="Use Chain-of-Thought reasoning") # CoT enable
