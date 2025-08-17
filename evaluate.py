@@ -444,7 +444,7 @@ class CoTMCQEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate language models on MCQ benchmarks with CoT reasoning")
-    parser.add_argument("--model", type=str, default="meta-llama/Meta-Llama-3-8B",
+    parser.add_argument("--model", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct",
                        help="HuggingFace model name") # model
     parser.add_argument("--dataset", type=str, default="tau/commonsense_qa",
                        help="Dataset name (tau/commonsense_qa, ai2_arc, hellaswag)") # dataset
