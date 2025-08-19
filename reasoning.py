@@ -228,7 +228,7 @@ def main():
     )
     
     # Process a small subset first (remove max_examples for full dataset)
-    results = generator.(
+    results = generator.process_dataset(
         split="validation",
         max_examples=10,  # Start with 5 examples for testing
         output_file="commonsenseqa_reasoning_sample.json",
