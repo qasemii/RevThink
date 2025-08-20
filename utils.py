@@ -78,7 +78,7 @@ def generate_reasoning(example, client, model="meta-llama/Llama-3.3-70B-Instruct
           **generation_configs
       )
 
-    output = response.choices[0].message.content.strip()
+    reasoning = response.choices[0].message.content.strip()
     
     return {
         "id": example.get("id", ""),
