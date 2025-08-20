@@ -9,7 +9,7 @@ import os
 import argparse
 from openai import OpenAI
 
-from utils import get_reasoning
+from utils import generate_reasoning, save_results
 
 # Example usage
 def main():

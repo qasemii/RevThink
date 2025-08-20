@@ -16,7 +16,6 @@
 
 
 import torch
-from openai import OpenAI
 from typing import List, Dict, Any
 
 import os
@@ -35,7 +34,7 @@ def verbalize_question(example: Dict) -> str:
     return formatted_question
 
 
-def get_reasoning(example, model="meta-llama/Llama-3.3-70B-Instruct-Turbo"):
+def generate_reasoning(example, model="meta-llama/Llama-3.3-70B-Instruct-Turbo"):
 
     formatted_question = verbalize_question(example)
     correct_answer = example["answerKey"]
