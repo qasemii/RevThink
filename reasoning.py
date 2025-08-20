@@ -33,7 +33,7 @@ def main():
 
     results = []
     for i, example in enumerate(tqdm(dataset, desc="Generating reasoning")):
-        result = self.generate_reasoning(example)
+        result = generate_reasoning(example)
         results.append(result)
 
     if output_file is None:
