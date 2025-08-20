@@ -36,9 +36,9 @@ def main():
         result = generate_reasoning(example, client)
         results.append(result)
 
-    if output_file is None:
-        output_file = f'output.json'
-    save_results(results, output_file)
+    if args.output_file is None:
+        args.output_file = f'output.json'
+    save_results(results, args.output_file)
 
 
     print("\nSample reasoning generated:")
