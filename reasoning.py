@@ -7,6 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 import os
 import argparse
+from openai import OpenAI
 
 from utils import get_reasoning
 
