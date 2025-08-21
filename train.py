@@ -142,7 +142,7 @@ if __name__ == '__main__':
   data_collator = ForwardDataCollator(tokenizer)
 
   lr = 5e-6 if 'mistral' in args.model else 2e-4
-  training_args = transformers.TrainingArguments(
+  training_args = TrainingArguments(
       output_dir=f'./outputs/{args.model}_{args.task}_{args.n}_forward_only',
       save_strategy='epoch',
       num_train_epochs=10,
@@ -159,7 +159,7 @@ if __name__ == '__main__':
       lr_scheduler_type='constant'
   )
 
-  trainer = transformers.Trainer(  # Use standard Trainer
+  trainer = Trainer(  # Use standard Trainer
       model=model,
       args=training_args,
       train_dataset=dataset,
