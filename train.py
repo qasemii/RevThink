@@ -23,6 +23,7 @@ import os
 import peft
 import torch
 from huggingface_hub import login
+
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 
 Dataset = torch.utils.data.Dataset
@@ -69,8 +70,7 @@ class CastOutputToFloat(torch.nn.Sequential):
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
-  parser.add_argument('--n', default=None, type=int)
-  parser.add_argument('--task', default='ANLI', type=str)
+  parser.add_argument('--task', default='CSQA', type=str)
   parser.add_argument('--model', default='gemma-7b', type=str)
   parser.add_argument('--model_dir', default='', type=str)
   parser.add_argument('--data_dir', default=None, type=str)
@@ -128,17 +128,10 @@ if __name__ == '__main__':
   with open(args.data_dir, 'r') as f:
     data = json.load(f)
 
-  num_samples = 0
-  training_data = []
-  if args.n:
-    num_samples = int(args.n / 100)
-    train_dataset = data[:num_samples]
-  else:
-    train_dataset = data
 
-  print(f'Using {args.n}% of data. ({num_samples}/{len(data)})')
-  print(len(training_data))
-  dataset = ForwardDataset(training_data)
+  #print(f'Using {args.n}% of data. ({num_samples}/{len(data)})')
+  #print(len(training_data))
+  dataset = ForwardDataset(data)
   data_collator = ForwardDataCollator(tokenizer)
 
   lr = 5e-6 if 'mistral' in args.model else 2e-4
