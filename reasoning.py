@@ -100,7 +100,8 @@ def main():
     
     args = parser.parse_args()
 
-    api_key = "80f3a660c2bd5c3902101d1d1977c951c8659d55b2b949ae42e47f8b6d42c6d7"
+    # api_key = "80f3a660c2bd5c3902101d1d1977c951c8659d55b2b949ae42e47f8b6d42c6d7"    # Pasquale
+    api_key = "5267889cb900448d37ff89173b599afbb19f2e2052a6cbc717f0320021fa2cd2"  # Reza
 
     dataset = load_dataset("tau/commonsense_qa", split=args.split)
     if args.max_examples:
