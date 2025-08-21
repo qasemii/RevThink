@@ -22,6 +22,7 @@ import os
 
 import peft
 import torch
+from huggingface_hub import login
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 
 Dataset = torch.utils.data.Dataset
@@ -122,9 +123,9 @@ if __name__ == '__main__':
   model = peft.get_peft_model(model, lora_config)
   
   # Chceck if the data file is passed
-  assert teacher_data_file
-  print(teacher_data_file)
-  with open(teacher_data_file, 'r') as f:
+  assert args.data_dir
+  print(args.data_dir)
+  with open(args.data_dir, 'r') as f:
     data = json.load(f)
 
   num_samples = 0
