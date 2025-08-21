@@ -23,7 +23,6 @@ import os
 import peft
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
-from utils import CastOutputToFloat
 
 Dataset = torch.utils.data.Dataset
 
