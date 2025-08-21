@@ -41,7 +41,9 @@ def generate_reasoning(example, client, model="meta-llama/Llama-3.3-70B-Instruct
 
         The correct answer is: {correct_answer}. {correct_answer_text}
 
-        Keep your explanation clear, concise, and as brief as possible, focusing on the logical reasoning process.
+        Please provide a reasoning aligned with the following criteria:
+        1. For each option, you have to provide an explanation.
+        2. Keep your explanation clear, concise, and brief.
 
         """
 
