@@ -25,7 +25,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 
 Dataset = torch.utils.data.Dataset
-
+login(os.getenv("HF_TOKEN"))
 
 class ForwardDataset(Dataset):
   def __init__(self, ex):
