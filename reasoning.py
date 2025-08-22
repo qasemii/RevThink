@@ -112,7 +112,6 @@ def main():
         base_url="https://api.together.xyz/v1",
     )
 
-                                                                                                                                                              v
     if args.output_file is None:
         args.output_file = f'output.json'
 
