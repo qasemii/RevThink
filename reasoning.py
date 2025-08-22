@@ -122,7 +122,7 @@ def main():
 
         # Save progress periodically
         if (i + 1) % 10 == 0:
-            save_results(results, output_file)
+            save_results(results, args.output_file)
 
     if args.output_file is None:
         args.output_file = f'output.json'
