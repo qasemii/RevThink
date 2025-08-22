@@ -101,14 +101,14 @@ def main():
     args = parser.parse_args()
 
     # api_key = "80f3a660c2bd5c3902101d1d1977c951c8659d55b2b949ae42e47f8b6d42c6d7"    # Pasquale
-    api_key = "tgp_v1_Hlyiw1xzK5t5UP_If943fjZI7GAbGDHySHvMRv"  # Reza
+    api_key = "tgp_v1_Hlyiw1xzK5t5UP_If943fjZI7GAbGDHySHvMRv-rKg8"  # Reza
 
     dataset = load_dataset("tau/commonsense_qa", split=args.split)
     if args.max_examples:
         dataset = dataset.select(range(args.max_examples))
 
     client = OpenAI(
-        api_key = api_key or os.getenv("OPENAI_API_KEY"),
+        api_key = api_key,
         base_url="https://api.together.xyz/v1",
     )
 
