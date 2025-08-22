@@ -112,10 +112,18 @@ def main():
         base_url="https://api.together.xyz/v1",
     )
 
+
+    if args.output_file is None:
+        args.output_file = f'output.json'
+        
     results = []
     for i, example in enumerate(tqdm(dataset, desc="Generating reasoning")):
         result = generate_reasoning(example, client)
         results.append(result)
+
+        # Save progress periodically
+        if (i + 1) % 10 == 0:
+            self.save_results(results, output_file)
 
     if args.output_file is None:
         args.output_file = f'output.json'
