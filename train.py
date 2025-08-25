@@ -28,7 +28,7 @@ from huggingface_hub import login
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 
 Dataset = torch.utils.data.Dataset
-login(os.getenv("HF_TOKEN"))
+
 
 class ForwardDataset(Dataset):
   def __init__(self, ex):
@@ -80,8 +80,11 @@ if __name__ == '__main__':
   parser.add_argument('--model', default='gemma-7b', type=str)
   parser.add_argument('--model_dir', default='', type=str)
   parser.add_argument('--data_dir', default=None, type=str)
+  parser.add_argument('--api_key', default=None, type=str)
 
   args = parser.parse_args()
+
+  login(os.getenv("HF_TOKEN") or args.api_key)
 
   if args.model == 'mistral-7b':
     base_model = 'mistralai/Mistral-7B-Instruct-v0.3'
