@@ -147,7 +147,7 @@ if __name__ == '__main__':
 
   lr = 5e-6 if 'mistral' in args.model else 2e-4
   training_args = TrainingArguments(
-      output_dir=f'./outputs/{args.model}_{args.task}_{args.n}_forward_only',
+      output_dir=f'./outputs/{args.model}_{args.task}_sft_all',
       save_strategy='epoch',
       num_train_epochs=10,
       per_device_train_batch_size=4,
@@ -174,6 +174,6 @@ if __name__ == '__main__':
   trainer.train()
 
   logger.info(f"Saving the checkpoints ...")
-  save_path = f'./checkpoints/{args.model}_{args.task}_{args.n}_forward_only'
+  save_path = f'./checkpoints/{args.model}_{args.task}_sft_all'
   os.makedirs(save_path, exist_ok=True)
   trainer.model.save_pretrained(save_path)
