@@ -15,11 +15,49 @@ import os
 from huggingface_hub import login
 
 
-login(os.getenv("HF_TOKEN"))
-
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def load_and_merge_peft(base_model_name: str, peft_checkpoint_dir: str, tmp_dir: Optional[str] = None) -> str:
+    """Load base model, apply PEFT adapters from checkpoint, merge, and save to a temp dir.
+
+    Returns the path to the merged model directory.
+    """
+    if not os.path.isdir(peft_checkpoint_dir):
+        raise FileNotFoundError(f"Checkpoint directory not found: {peft_checkpoint_dir}")
+
+    logger.info(f"Loading base model: {base_model_name}")
+    base_model = AutoModelForCausalLM.from_pretrained(
+        base_model_name,
+        device_map="auto",
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+    )
+
+    logger.info(f"Applying PEFT adapters from: {peft_checkpoint_dir}")
+    model = peft.PeftModel.from_pretrained(base_model, peft_checkpoint_dir)
+
+    # Merge LoRA weights into the base model for faster inference
+    logger.info("Merging LoRA adapters into base model and unloading PEFT wrappers...")
+    try:
+        model = model.merge_and_unload()
+    except AttributeError:
+        logger.warning("merge_and_unload not available; proceeding without merging.")
+
+    # Save merged model to a temporary directory
+    save_dir = tmp_dir or tempfile.mkdtemp(prefix="merged_model_")
+    os.makedirs(save_dir, exist_ok=True)
+
+    logger.info(f"Saving merged model to: {save_dir}")
+    model.save_pretrained(save_dir)
+
+    # Save tokenizer as well so downstream loader finds special tokens
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.save_pretrained(save_dir)
+
+    return save_dir
 
 class CoTMCQEvaluator:
     def __init__(self, model_name: str, device: str = "auto", max_length: int = 512):
@@ -465,14 +503,26 @@ def main():
                        help="Output file to save results (JSON format)")
     parser.add_argument("--compare_methods", action="store_true", default=False,
                        help="Run both standard and CoT evaluation for comparison")
+    parser.add_argument("--hf_token", type=str, default=None,
+                        help="Optional HF token (or set HF_TOKEN env var)")
+    parser.add_argument("--use_adapter", type=bool, default=False)
+    parser.add_argument("--adapter_dir", type=str, default=None,
+                        help="Optional HF token (or set HF_TOKEN env var)")
 
     # Parse only known arguments, ignoring others
     args, unknown = parser.parse_known_args()
     if unknown:
         logger.warning(f"Ignoring unknown arguments: {unknown}")
 
+
+    login(os.getenv("HF_TOKEN") or args.hf_token)
+
     # Initialize evaluator
-    evaluator = CoTMCQEvaluator(args.model, args.device, args.max_length)
+    if args.use_adapter:
+        assert args.adapter_dir
+        merged_dir = load_and_merge_peft(args.model, args.adapter_dir)
+    else:
+        evaluator = CoTMCQEvaluator(args.model, args.device, args.max_length)
 
     if args.compare_methods:
         # Run both methods for comparison
