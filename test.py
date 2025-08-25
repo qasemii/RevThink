@@ -59,31 +59,24 @@ def load_and_merge_peft(base_model_name: str, peft_checkpoint_dir: str, tmp_dir:
 
 def main():
     parser = argparse.ArgumentParser(description="Load a trained PEFT model and evaluate it on a dataset.")
-    parser.add_argument("--checkpoint_dir", type=str, required=True,
-                        help="Path to the PEFT checkpoint directory saved by train.py (e.g., ./checkpoints/gemma-7b_CSQA_sft_all)")
-    parser.add_argument("--base_model", type=str, required=True,
-                        help="Base HF model name that was fine-tuned (e.g., google/gemma-7b-it)")
-    parser.add_argument("--dataset", type=str, default="tau/commonsense_qa",
-                        help="Dataset name (tau/commonsense_qa, ai2_arc, hellaswag)")
-    parser.add_argument("--split", type=str, default="validation",
-                       help="Dataset split to evaluate on") # split
-    parser.add_argument("--max_samples", type=int, default=None,
-                       help="Maximum number of samples to evaluate") # max number of samples
-    parser.add_argument("--device", type=str, default="auto",
-                        help="Device to run on (auto, cuda, cpu)")
+    parser.add_argument("--checkpoint_dir", type=str, required=True)
+    parser.add_argument("--base_model", default='gemma-7b', type=str)
+    parser.add_argument("--dataset", type=str, default="tau/commonsense_qa")
+    parser.add_argument("--split", type=str, default="validation") # split
+    parser.add_argument("--max_samples", type=int, default=None) # max number of samples
+    parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--max_length", type=int, default=512,
                         help="Maximum input length")
     parser.add_argument("--output", type=str, default=None,
                         help="Optional JSON path to save evaluation results")
-    parser.add_argument("--hf_token", type=str, default=None,
-                        help="Optional HF token (or set HF_TOKEN env var)")
+    parser.add_argument("--api_key", type=str, default=None)
 
     args, unknown = parser.parse_known_args()
     if unknown:
         logger.warning(f"Ignoring unknown arguments: {unknown}")
 
     # Authenticate to HF if needed
-    login(os.getenv("HF_TOKEN") or args.hf_token)
+    login(os.getenv("HF_TOKEN") or args.api_key)
 
     merged_dir = None
     try:
