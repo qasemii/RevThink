@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 
+import logging
 import peft
 import torch
 from huggingface_hub import login
@@ -68,6 +69,11 @@ class CastOutputToFloat(torch.nn.Sequential):
   def forward(self, x):
     return super().forward(x).to(torch.float32)
 
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument('--task', default='CSQA', type=str)
@@ -100,6 +106,7 @@ if __name__ == '__main__':
   tokenizer.add_bos_token = False
   tokenizer.add_eos_token = False
 
+  logger.info(f"Loading model: {base_model}")
   model = AutoModelForCausalLM.from_pretrained(
       base_model,
       device_map='auto',
@@ -123,6 +130,7 @@ if __name__ == '__main__':
   model = peft.get_peft_model(model, lora_config)
   
   # Chceck if the data file is passed
+  logger.info(f"Loading dataset: {args.data_dir}")
   assert args.data_dir
   print(args.data_dir)
   with open(args.data_dir, 'r') as f:
@@ -152,6 +160,7 @@ if __name__ == '__main__':
       lr_scheduler_type='constant'
   )
 
+  logger.info(f"Training the model ...")
   trainer = Trainer(  # Use standard Trainer
       model=model,
       args=training_args,
@@ -160,6 +169,8 @@ if __name__ == '__main__':
   )
 
   trainer.train()
+
+  logger.info(f"Saving the checkpoints ...")
   save_path = f'./checkpoints/{args.model}_{args.task}_{args.n}_forward_only'
   os.makedirs(save_path, exist_ok=True)
   trainer.model.save_pretrained(save_path)
