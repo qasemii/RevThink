@@ -11,6 +11,8 @@ from collections import defaultdict
 import re
 import sys
 import os
+import peft
+import tempfile
 
 from huggingface_hub import login
 
@@ -19,28 +21,26 @@ from huggingface_hub import login
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def load_and_merge_peft(base_model_name: str, peft_checkpoint_dir: str, tmp_dir: Optional[str] = None) -> str:
-    """Load base model, apply PEFT adapters from checkpoint, merge, and save to a temp dir.
+def load_and_merge_peft(model_name: str, peft_checkpoint_dir: str, tmp_dir: Optional[str] = None) -> str:
 
-    Returns the path to the merged model directory.
-    """
     if not os.path.isdir(peft_checkpoint_dir):
         raise FileNotFoundError(f"Checkpoint directory not found: {peft_checkpoint_dir}")
 
-    logger.info(f"Loading base model: {base_model_name}")
+    logger.info(f"Loading base model: {model_name}")
+
     base_model = AutoModelForCausalLM.from_pretrained(
-        base_model_name,
+        model_name,
         device_map="auto",
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
     )
 
     logger.info(f"Applying PEFT adapters from: {peft_checkpoint_dir}")
-    model = peft.PeftModel.from_pretrained(base_model, peft_checkpoint_dir)
+    peft_model = peft.PeftModel.from_pretrained(base_model, peft_checkpoint_dir)
 
     # Merge LoRA weights into the base model for faster inference
     logger.info("Merging LoRA adapters into base model and unloading PEFT wrappers...")
     try:
-        model = model.merge_and_unload()
+        peft_model = peft_model.merge_and_unload()
     except AttributeError:
         logger.warning("merge_and_unload not available; proceeding without merging.")
 
@@ -49,10 +49,10 @@ def load_and_merge_peft(base_model_name: str, peft_checkpoint_dir: str, tmp_dir:
     os.makedirs(save_dir, exist_ok=True)
 
     logger.info(f"Saving merged model to: {save_dir}")
-    model.save_pretrained(save_dir)
+    peft_model.save_pretrained(save_dir)
 
     # Save tokenizer as well so downstream loader finds special tokens
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.save_pretrained(save_dir)
@@ -310,8 +310,7 @@ class CoTMCQEvaluator:
         }
 
     def evaluate_dataset(self, dataset_name: str, split: str = "validation",
-                        max_samples: Optional[int] = None,
-                        use_cot: bool = True, cot_style: str = "basic") -> Dict:
+                        max_samples: Optional[int] = None, cot_style: str = "basic") -> Dict:
         """
         Evaluate the model on a dataset with or without CoT reasoning.
 
@@ -319,8 +318,7 @@ class CoTMCQEvaluator:
             dataset_name: Name of the dataset
             split: Dataset split to evaluate on
             max_samples: Maximum number of samples to evaluate
-            use_cot: Whether to use Chain-of-Thought reasoning
-            cot_style: Style of CoT prompting if use_cot=True
+            cot_style: Style of CoT prompting
         """
         logger.info(f"Loading dataset: {dataset_name}")
 
@@ -373,12 +371,11 @@ class CoTMCQEvaluator:
             "accuracy": 0.0,
             "predictions": [],
             "confusion_matrix": defaultdict(lambda: defaultdict(int)),
-            "evaluation_method": "CoT" if use_cot else "Standard",
-            "cot_style": cot_style if use_cot else None,
+            "cot_style": cot_style,
             "extraction_failures": 0
         }
 
-        method_desc = f"CoT ({cot_style})" if use_cot else "Standard probability-based"
+        method_desc = f"CoT ({cot_style})"
         logger.info(f"Evaluating on {len(dataset)} samples using {method_desc} method...")
 
         for i, item in enumerate(tqdm(dataset)):
@@ -387,7 +384,7 @@ class CoTMCQEvaluator:
             correct_answer = extract_answer(item)
 
             try:
-                if use_cot:
+                if cot_style:
                     pred_result = self.predict_answer_cot(question, choices, cot_style)
                 else:
                     pred_result = self.predict_answer_standard(question, choices)
@@ -414,7 +411,7 @@ class CoTMCQEvaluator:
                     "extraction_successful": pred_result["extraction_successful"]
                 }
 
-                if use_cot:
+                if cot_style:
                     prediction_record["reasoning"] = pred_result["reasoning"]
                 else:
                     prediction_record["choice_probabilities"] = pred_result["choice_probabilities"]
@@ -436,16 +433,13 @@ class CoTMCQEvaluator:
     def print_results(self, results: Dict):
         """Print evaluation results in a formatted way."""
         print(f"\n{'='*60}")
-        print(f"EVALUATION RESULTS - {results['evaluation_method']} METHOD")
-        print(f"{'='*60}")
         print(f"Model: {self.model_name}")
         print(f"Total samples: {results['total']}")
         print(f"Correct predictions: {results['correct']}")
         print(f"Accuracy: {results['accuracy']:.4f} ({results['accuracy']*100:.2f}%)")
 
-        if results['evaluation_method'] == 'CoT':
-            print(f"CoT Style: {results['cot_style']}")
-            print(f"Answer extraction failures: {results['extraction_failures']} ({results['extraction_failure_rate']*100:.2f}%)")
+        print(f"CoT Style: {results['cot_style']}")
+        print(f"Answer extraction failures: {results['extraction_failures']} ({results['extraction_failure_rate']*100:.2f}%)")
 
         # Print confusion matrix
         if results["confusion_matrix"]:
@@ -482,32 +476,18 @@ class CoTMCQEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate language models on MCQ benchmarks with CoT reasoning")
-    parser.add_argument("--model", type=str, default="meta-llama/Llama-3.2-1B-Instruct",
-                       help="HuggingFace model name") # model
-    parser.add_argument("--dataset", type=str, default="tau/commonsense_qa",
-                       help="Dataset name (tau/commonsense_qa, ai2_arc, hellaswag)") # dataset
-    parser.add_argument("--split", type=str, default="validation",
-                       help="Dataset split to evaluate on") # split
-    parser.add_argument("--max_samples", type=int, default=None,
-                       help="Maximum number of samples to evaluate") # max number of samples
-    parser.add_argument("--use_cot", action="store_true", default=True,
-                       help="Use Chain-of-Thought reasoning") # CoT enable
-    parser.add_argument("--cot_style", type=str, default="basic",
-                       choices=["basic", "detailed", "step_by_step", "few_shot"],
-                       help="Style of CoT prompting") # CoT mode
-    parser.add_argument("--device", type=str, default="auto",
-                       help="Device to run on (auto, cuda, cpu)")
-    parser.add_argument("--max_length", type=int, default=512,
-                       help="Maximum sequence length")
-    parser.add_argument("--output", type=str, default=None,
-                       help="Output file to save results (JSON format)")
-    parser.add_argument("--compare_methods", action="store_true", default=False,
-                       help="Run both standard and CoT evaluation for comparison")
-    parser.add_argument("--hf_token", type=str, default=None,
-                        help="Optional HF token (or set HF_TOKEN env var)")
-    parser.add_argument("--use_adapter", type=bool, default=False)
-    parser.add_argument("--adapter_dir", type=str, default=None,
-                        help="Optional HF token (or set HF_TOKEN env var)")
+    parser.add_argument("--model", type=str, default="gemma-7b") # model
+    parser.add_argument("--dataset", type=str, default="tau/commonsense_qa") # dataset
+    parser.add_argument("--split", type=str, default="validation") # split
+    parser.add_argument("--max_samples", type=int, default=None) # max number of samples
+    parser.add_argument("--cot_style", type=str, default=None,
+                       choices=[None, "basic", "detailed", "step_by_step", "few_shot"]) # CoT mode
+    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--max_length", type=int, default=512)
+    parser.add_argument("--output", type=str, default=None)
+    parser.add_argument("--compare_methods", action="store_true", default=False)
+    parser.add_argument("--hf_token", type=str, default=None)
+    parser.add_argument("--adapter_dir", type=str, default=None)
 
     # Parse only known arguments, ignoring others
     args, unknown = parser.parse_known_args()
@@ -517,23 +497,32 @@ def main():
 
     login(os.getenv("HF_TOKEN") or args.hf_token)
 
-    # Initialize evaluator
-    if args.use_adapter:
-        assert args.adapter_dir
-        merged_dir = load_and_merge_peft(args.model, args.adapter_dir)
+    if args.model == 'mistral-7b':
+        base_model = 'mistralai/Mistral-7B-Instruct-v0.3'
+    elif args.model == 'gemma-2b':
+        base_model = 'google/gemma-2b-it'
+    elif args.model == 'gemma-7b':
+        base_model = 'google/gemma-7b-it'
     else:
-        evaluator = CoTMCQEvaluator(args.model, args.device, args.max_length)
+        raise ValueError(f'Unsupported model: {args.model}')
+
+    # Initialize evaluator
+    if args.adapter_dir:
+        merged_dir = load_and_merge_peft(base_model, args.adapter_dir)
+        evaluator = CoTMCQEvaluator(merged_dir, args.device, args.max_length)
+    else:
+        evaluator = CoTMCQEvaluator(base_model, args.device, args.max_length)
 
     if args.compare_methods:
         # Run both methods for comparison
         print("Running Standard Evaluation...")
         results_standard = evaluator.evaluate_dataset(
-            args.dataset, args.split, args.max_samples, use_cot=False
+            args.dataset, args.split, args.max_samples
         )
 
         print("\nRunning CoT Evaluation...")
         results_cot = evaluator.evaluate_dataset(
-            args.dataset, args.split, args.max_samples, use_cot=True, cot_style=args.cot_style
+            args.dataset, args.split, args.max_samples, cot_style=args.cot_style
         )
 
         # Print comparison
@@ -564,7 +553,7 @@ def main():
     else:
         # Run single evaluation
         results = evaluator.evaluate_dataset(
-            args.dataset, args.split, args.max_samples, args.use_cot, args.cot_style
+            args.dataset, args.split, args.max_samples, args.cot_style
         )
 
         evaluator.print_results(results)
