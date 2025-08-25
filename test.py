@@ -3,14 +3,13 @@ import os
 import shutil
 import tempfile
 import logging
-from typing import Optional
+from typing import Optional, Dict, List
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from huggingface_hub import login
 import peft
-
-from evaluate import CoTMCQEvaluator
+from datasets import load_dataset
 
 
 logging.basicConfig(level=logging.INFO)
@@ -67,14 +66,9 @@ def main():
     parser.add_argument("--dataset", type=str, default="tau/commonsense_qa",
                         help="Dataset name (tau/commonsense_qa, ai2_arc, hellaswag)")
     parser.add_argument("--split", type=str, default="validation",
-                        help="Dataset split (validation/test)")
+                       help="Dataset split to evaluate on") # split
     parser.add_argument("--max_samples", type=int, default=None,
-                        help="Max number of samples to evaluate")
-    parser.add_argument("--use_cot", action="store_true", default=True,
-                        help="Use Chain-of-Thought reasoning prompts")
-    parser.add_argument("--cot_style", type=str, default="basic",
-                        choices=["basic", "detailed", "step_by_step", "few_shot"],
-                        help="CoT prompting style")
+                       help="Maximum number of samples to evaluate") # max number of samples
     parser.add_argument("--device", type=str, default="auto",
                         help="Device to run on (auto, cuda, cpu)")
     parser.add_argument("--max_length", type=int, default=512,
@@ -91,25 +85,147 @@ def main():
     # Authenticate to HF if needed
     login(os.getenv("HF_TOKEN") or args.hf_token)
 
-    tmp_dir = None
     merged_dir = None
     try:
         # Merge PEFT adapters into base model
         merged_dir = load_and_merge_peft(args.base_model, args.checkpoint_dir)
 
-        # Reuse existing evaluator pipeline by pointing it to the merged model directory
-        evaluator = CoTMCQEvaluator(merged_dir, device=args.device, max_length=args.max_length)
-        results = evaluator.evaluate_dataset(
-            dataset_name=args.dataset,
-            split=args.split,
-            max_samples=args.max_samples,
-            use_cot=args.use_cot,
-            cot_style=args.cot_style,
+        # Load merged model and tokenizer for inference
+        device = (
+            torch.device("cuda") if (args.device in ["auto", "cuda"] and torch.cuda.is_available())
+            else torch.device("cpu")
         )
-        evaluator.print_results(results)
+        logger.info(f"Loading merged model from {merged_dir} on device: {device}")
+        tokenizer = AutoTokenizer.from_pretrained(merged_dir)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        model = AutoModelForCausalLM.from_pretrained(
+            merged_dir,
+            torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+            device_map="auto" if device.type == "cuda" else None,
+        )
+        model.eval()
+
+        # Dataset loading (no CoT)
+        logger.info(f"Loading dataset: {args.dataset} [{args.split}]")
+        if "commonsense_qa" in args.dataset.lower():
+            dataset = load_dataset("tau/commonsense_qa", split=args.split)
+
+            def extract_question(example: Dict) -> str:
+                # Simple prompt: question and lettered choices; no CoT
+                q = "Answer the following question:\n"
+                q += f"Question: {example['question']}\n"
+                for i, choice in enumerate(example['choices']['text']):
+                    q += f"{example['choices']['label'][i]}. {choice}\n"
+                q += "Answer:"
+                return q
+
+            def extract_choices(example: Dict) -> List[str]:
+                return example['choices']['label']
+
+            def extract_answer(example: Dict) -> str:
+                return example['answerKey']
+
+        elif "ai2_arc" in args.dataset.lower() or "arc" in args.dataset.lower():
+            dataset = load_dataset("ai2_arc", "ARC-Challenge", split=args.split)
+
+            def extract_question(example: Dict) -> str:
+                q = f"Question: {example['question']}\n"
+                for i, choice in enumerate(example['choices']['text']):
+                    label = example['choices']['label'][i]
+                    q += f"{label}. {choice}\n"
+                q += "Answer:"
+                return q
+
+            def extract_choices(example: Dict) -> List[str]:
+                return example['choices']['label']
+
+            def extract_answer(example: Dict) -> str:
+                return example['answerKey']
+
+        elif "hellaswag" in args.dataset.lower():
+            dataset = load_dataset("hellaswag", split=args.split)
+
+            def extract_question(example: Dict) -> str:
+                q = f"Context: {example['ctx']}\n"
+                for i, ending in enumerate(example['endings']):
+                    q += f"{chr(65 + i)}. {ending}\n"
+                q += "Answer:"
+                return q
+
+            def extract_choices(example: Dict) -> List[str]:
+                # Use letters A-D
+                return [chr(65 + i) for i in range(len(example['endings']))]
+
+            def extract_answer(example: Dict) -> str:
+                return chr(65 + int(example['label']))
+
+        else:
+            raise ValueError(f"Dataset {args.dataset} not supported.")
+
+        if args.max_samples:
+            dataset = dataset.select(range(min(args.max_samples, len(dataset))))
+
+        def choice_probabilities(prompt: str, choice_letters: List[str]) -> Dict[str, float]:
+            inputs = tokenizer(prompt, return_tensors="pt")
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = model(**inputs)
+                logits = outputs.logits[0, -1, :]
+                probs = torch.softmax(logits, dim=-1)
+            scores: Dict[str, float] = {}
+            for letter in choice_letters:
+                # Try with space prefix, then without
+                token_ids = tokenizer.encode(f" {letter}", add_special_tokens=False)
+                if not token_ids:
+                    token_ids = tokenizer.encode(letter, add_special_tokens=False)
+                if token_ids:
+                    scores[letter] = probs[token_ids[0]].item()
+                else:
+                    scores[letter] = 0.0
+            return scores
+
+        # Evaluate
+        total = len(dataset)
+        correct = 0
+        predictions = []
+        logger.info(f"Evaluating {total} samples (no CoT)...")
+        for i, ex in enumerate(dataset):
+            prompt = extract_question(ex)
+            choice_letters = extract_choices(ex)
+            probs = choice_probabilities(prompt, choice_letters)
+            pred = max(probs.keys(), key=lambda k: probs[k])
+            gold = extract_answer(ex)
+            is_correct = pred == gold
+            if is_correct:
+                correct += 1
+            predictions.append({
+                "question": prompt[:200],
+                "predicted": pred,
+                "gold": gold,
+                "is_correct": is_correct,
+                "probs": probs,
+            })
+
+        accuracy = correct / total if total > 0 else 0.0
+        print(f"\n{'='*60}")
+        print("EVALUATION RESULTS - No CoT")
+        print(f"{'='*60}")
+        print(f"Model: merged ({args.base_model})")
+        print(f"Dataset: {args.dataset} [{args.split}] | Samples: {total}")
+        print(f"Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
 
         if args.output:
             import json
+            results = {
+                "model": args.base_model,
+                "dataset": args.dataset,
+                "split": args.split,
+                "total": total,
+                "correct": correct,
+                "accuracy": accuracy,
+                "predictions": predictions[:50],  # limit size
+            }
             with open(args.output, "w") as f:
                 json.dump(results, f, indent=2)
             logger.info(f"Results saved to: {args.output}")
