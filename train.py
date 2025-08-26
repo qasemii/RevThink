@@ -40,7 +40,8 @@ class ForwardDataset(Dataset):
   def __getitem__(self, idx):
     item = self.data[idx]
     return fr_template.format(question=item['question'],
-                             answer=item['reasoning'])
+                             reasoning=item['reasoning'],
+                             answer=item['correct_answer'])
 
 
 class ForwardDataCollator:
@@ -96,9 +97,9 @@ if __name__ == '__main__':
     raise ValueError(f'Unsupported model: {args.model}')
 
   if 'mistral' in args.model:
-    fr_template = """<s>[INST] Answer the following question:\n### Question: {question} [/INST] ### Answer: {answer}</s>"""
+    fr_template = """<s>[INST] Answer the following question:\n### Question: {question} [/INST] ### Answer: {reasoning}. Therefore, the answer is ({answer}).</s>"""
   elif 'gemma' in args.model:
-    fr_template = """<bos><start_of_turn>user\nAnswer the following question:\n### Question: {question}<end_of_turn>\n<start_of_turn>model\n### Answer: {answer}<eos>"""
+    fr_template = """<bos><start_of_turn>user\nAnswer the following question:\n### Question: {question}<end_of_turn>\n<start_of_turn>model\n### Answer: {reasoning}. Therefore, the answer is ({answer}).<eos>"""
 
   tokenizer = AutoTokenizer.from_pretrained(
       base_model,
@@ -147,7 +148,7 @@ if __name__ == '__main__':
 
   lr = 5e-6 if 'mistral' in args.model else 2e-4
   training_args = TrainingArguments(
-      output_dir=f'./outputs/{args.model}_{args.task}_sft_all',
+      output_dir=f'./outputs_new/{args.model}_{args.task}_sft_all',
       save_strategy='epoch',
       num_train_epochs=10,
       per_device_train_batch_size=4,
