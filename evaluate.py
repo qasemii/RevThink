@@ -2,6 +2,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
 import json
+import random
 from tqdm import tqdm
 import numpy as np
 from typing import Dict, List, Tuple, Optional
@@ -59,11 +60,28 @@ def load_and_merge_peft(model_name: str, peft_checkpoint_dir: str, tmp_dir: Opti
 
     return save_dir
 
+def set_global_seed(seed: int = 42, deterministic: bool = True):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    try:
+        torch.backends.cudnn.deterministic = deterministic
+        torch.backends.cudnn.benchmark = False if deterministic else True
+        if deterministic and torch.cuda.is_available():
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+            torch.use_deterministic_algorithms(True)
+    except Exception:
+        pass
+
 class CoTMCQEvaluator:
-    def __init__(self, model_name: str, device: str = "auto", max_length: int = 512):
+    def __init__(self, model_name: str, device: str = "auto", max_length: int = 512, seed: int = 42):
         self.model_name = model_name
         self.device = self._setup_device(device)
         self.max_length = max_length
+        self.seed = seed
 
         logger.info(f"Loading model: {model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -79,6 +97,12 @@ class CoTMCQEvaluator:
 
         self.model.eval()
         logger.info(f"Model loaded on device: {self.device}")
+        # Generator for reproducible sampling
+        try:
+            gen_device = self.device if self.device.type == 'cuda' else 'cpu'
+            self.generator = torch.Generator(device=gen_device).manual_seed(self.seed)
+        except Exception:
+            self.generator = torch.Generator().manual_seed(self.seed)
 
     def _setup_device(self, device: str) -> torch.device:
         """Setup the appropriate device for inference."""
@@ -196,6 +220,7 @@ class CoTMCQEvaluator:
                 do_sample=True,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
+                generator=self.generator,
             )
 
         # Decode only the generated part
@@ -410,6 +435,7 @@ def main():
     parser.add_argument("--compare_methods", action="store_true", default=False)
     parser.add_argument("--hf_token", type=str, default=None)
     parser.add_argument("--adapter_dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=42)
 
     # Parse only known arguments, ignoring others
     args, unknown = parser.parse_known_args()
@@ -428,12 +454,15 @@ def main():
     else:
         raise ValueError(f'Unsupported model: {args.model}')
 
+    # Set seeds for reproducibility
+    set_global_seed(args.seed)
+
     # Initialize evaluator
     if args.adapter_dir:
         merged_dir = load_and_merge_peft(base_model, args.adapter_dir)
-        evaluator = CoTMCQEvaluator(merged_dir, args.device, args.max_length)
+        evaluator = CoTMCQEvaluator(merged_dir, args.device, args.max_length, seed=args.seed)
     else:
-        evaluator = CoTMCQEvaluator(base_model, args.device, args.max_length)
+        evaluator = CoTMCQEvaluator(base_model, args.device, args.max_length, seed=args.seed)
 
     if args.compare_methods:
         # Run both methods for comparison
