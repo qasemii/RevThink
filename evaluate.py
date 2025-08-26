@@ -463,12 +463,12 @@ class CoTMCQEvaluator:
         print(f"\nSample Predictions:")
         for i, pred in enumerate(results["predictions"][:3]):
             print(f"\nExample {i+1}:")
-            print(f"Question: {pred['question'][:100]}...")
+            print(f"Question: {pred['question']}")
             print(f"Choices: {pred['choices']}")
             print(f"Correct: {pred['correct_answer']} | Predicted: {pred['predicted_answer']} | {'✓' if pred['is_correct'] else '✗'}")
 
-            if results['evaluation_method'] == 'CoT':
-                print(f"Reasoning: {pred['reasoning'][:200]}...")
+            if 'reasoning' in pred.keys():
+                print(f"Reasoning: {pred['reasoning']}")
                 print(f"Extraction successful: {pred['extraction_successful']}")
             else:
                 print(f"Probabilities: {pred['choice_probabilities']}")
