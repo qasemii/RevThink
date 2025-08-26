@@ -89,15 +89,7 @@ class CoTMCQEvaluator:
                 return torch.device("cpu")
         return torch.device(device)
 
-    def format_question_standard(self, question: str, choices: List[str]) -> str:
-        """Format question for standard (non-CoT) evaluation."""
-        formatted = f"Question: {question}\n"
-        for i, choice in enumerate(choices):
-            formatted += f"{chr(65 + i)}. {choice}\n"
-        formatted += "Answer:"
-        return formatted
-
-    def format_question_cot(self, question: str, choices: List[str], cot_style: str = "basic") -> str:
+    def format_question(self, question: str, choices: List[str], cot_style: str = "basic") -> str:
         """
         Format question with Chain-of-Thought prompting.
 
@@ -133,6 +125,13 @@ class CoTMCQEvaluator:
             for i, choice in enumerate(choices):
                 formatted += f"{chr(65 + i)}. {choice}\n"
             formatted += f"\nLet me think through this step by step:\n"
+
+        else:
+            """Format question for standard (non-CoT) evaluation."""
+            formatted = f"Question: {question}\n"
+            for i, choice in enumerate(choices):
+                formatted += f"{chr(65 + i)}. {choice}\n"
+            formatted += "Answer:"
 
         return formatted
 
@@ -205,108 +204,41 @@ class CoTMCQEvaluator:
 
         return reasoning.strip()
 
-    def extract_answer_from_reasoning(self, reasoning: str, num_choices: int) -> Optional[str]:
-        """
-        Extract the final answer from the generated reasoning.
-
-        Args:
-            reasoning: Generated reasoning text
-            num_choices: Number of available choices
-
-        Returns:
-            Extracted answer letter or None if not found
-        """
-        # Look for common answer patterns
+    def extract_answer(self, reasoning: str, num_choices: int) -> Optional[str]:
+        # All patterns must have a capturing group
         patterns = [
-            r'(?:answer is|Answer:|the answer is)\s*([A-E])',
-            r'(?:Therefore|So|Thus),?\s*(?:the answer is)?\s*([A-E])',
-            r'(?:correct answer|right answer).*?([A-E])',
-            r'\b([A-E])\s*(?:is correct|is right|is the answer)',
-            r'choose\s*([A-E])',
-            r'select\s*([A-E])',
+            r'(?i)\bthe answer is\s*([A-Z])\b',     # The answer is B
+            r'(?i)\banswer\s*[:\-]?\s*([A-Z])\b',   # Answer: B
+            r'\boption\s*([A-Z])\b',                # option B
+            r'\bi\s*think.*?\b([A-Z])\b',           # I think it's B
+            r'^([A-Z])\b',                          # Line starting with A-Z
+            r'\b([A-Z])\.'                          # A. Some text
         ]
-
-        valid_choices = [chr(65 + i) for i in range(num_choices)]
-
-        # Try each pattern
+        
         for pattern in patterns:
-            matches = re.findall(pattern, reasoning, re.IGNORECASE)
-            for match in matches:
-                if match.upper() in valid_choices:
-                    return match.upper()
-
-        # Fallback: look for any letter that appears near the end
-        words = reasoning.split()[-20:]  # Look at last 20 words
-        for word in reversed(words):
-            for char in word:
-                if char.upper() in valid_choices:
-                    return char.upper()
-
-        # Last resort: find the most frequent valid letter in the reasoning
-        letter_counts = defaultdict(int)
-        for char in reasoning.upper():
-            if char in valid_choices:
-                letter_counts[char] += 1
-
-        if letter_counts:
-            return max(letter_counts.keys(), key=lambda k: letter_counts[k])
-
+            match = re.search(pattern, reasoning, flags=re.MULTILINE)
+            if match:
+                return match.group(1).upper()
+        
         return None
 
-    def get_answer_probabilities(self, prompt: str, choices: List[str]) -> Dict[str, float]:
-        """Get probability-based predictions (for non-CoT evaluation)."""
-        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            logits = outputs.logits[0, -1, :]
-
-        choice_probs = {}
-        choice_letters = [chr(65 + i) for i in range(len(choices))]
-
-        for letter in choice_letters:
-            token_id = self.tokenizer.encode(f" {letter}", add_special_tokens=False)
-            if token_id:
-                choice_probs[letter] = torch.softmax(logits, dim=-1)[token_id[0]].item()
-            else:
-                token_id = self.tokenizer.encode(letter, add_special_tokens=False)
-                if token_id:
-                    choice_probs[letter] = torch.softmax(logits, dim=-1)[token_id[0]].item()
-                else:
-                    choice_probs[letter] = 0.0
-
-        return choice_probs
-
-    def predict_answer_cot(self, question: str, choices: List[str], cot_style: str = "basic") -> Dict:
+        
+    def predict_answer(self, question: str, choices: List[str], cot_style: str = "basic") -> Dict:
         """
         Predict answer using Chain-of-Thought reasoning.
 
         Returns:
             Dictionary containing prediction, reasoning, and metadata
         """
-        prompt = self.format_question_cot(question, choices, cot_style)
+        prompt = self.format_question(question, choices, cot_style)
         reasoning = self.generate_reasoning(prompt)
-        predicted_letter = self.extract_answer_from_reasoning(reasoning, len(choices))
+        predicted_letter = self.extract_answer(reasoning, len(choices))
 
         return {
             "predicted_answer": predicted_letter,
             "reasoning": reasoning,
             "prompt": prompt,
             "extraction_successful": predicted_letter is not None
-        }
-
-    def predict_answer_standard(self, question: str, choices: List[str]) -> Dict:
-        """Predict answer using standard probability-based approach."""
-        prompt = self.format_question_standard(question, choices)
-        choice_probs = self.get_answer_probabilities(prompt, choices)
-        predicted_letter = max(choice_probs.keys(), key=lambda k: choice_probs[k])
-
-        return {
-            "predicted_answer": predicted_letter,
-            "choice_probabilities": choice_probs,
-            "prompt": prompt,
-            "extraction_successful": True
         }
 
     def evaluate_dataset(self, dataset_name: str, split: str = "validation",
@@ -384,10 +316,7 @@ class CoTMCQEvaluator:
             correct_answer = extract_answer(item)
 
             try:
-                if cot_style:
-                    pred_result = self.predict_answer_cot(question, choices, cot_style)
-                else:
-                    pred_result = self.predict_answer_standard(question, choices)
+                pred_result = self.predict_answer(question, choices, cot_style)
 
                 predicted_answer = pred_result["predicted_answer"]
 
@@ -411,11 +340,8 @@ class CoTMCQEvaluator:
                     "extraction_successful": pred_result["extraction_successful"]
                 }
 
-                if cot_style:
-                    prediction_record["reasoning"] = pred_result["reasoning"]
-                else:
-                    prediction_record["choice_probabilities"] = pred_result["choice_probabilities"]
-
+                prediction_record["reasoning"] = pred_result["reasoning"]
+                
                 results["predictions"].append(prediction_record)
 
                 # Update confusion matrix
@@ -466,12 +392,8 @@ class CoTMCQEvaluator:
             print(f"Question: {pred['question']}")
             print(f"Choices: {pred['choices']}")
             print(f"Correct: {pred['correct_answer']} | Predicted: {pred['predicted_answer']} | {'✓' if pred['is_correct'] else '✗'}")
-
-            if 'reasoning' in pred.keys():
-                print(f"Reasoning: {pred['reasoning']}")
-                print(f"Extraction successful: {pred['extraction_successful']}")
-            else:
-                print(f"Probabilities: {pred['choice_probabilities']}")
+            print(f"Reasoning: {pred['reasoning']}")
+            print('-'*20)
 
 
 def main():
