@@ -405,7 +405,7 @@ def main():
     parser.add_argument("--cot_style", type=str, default=None,
                        choices=[None, "basic", "detailed", "step_by_step", "few_shot"]) # CoT mode
     parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--max_length", type=int, default=512)
+    parser.add_argument("--max_length", type=int, default=1024)
     parser.add_argument("--output", type=str, default=None)
     parser.add_argument("--compare_methods", action="store_true", default=False)
     parser.add_argument("--hf_token", type=str, default=None)
